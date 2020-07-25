@@ -1,0 +1,2 @@
+VIDEO_WINDOW_NAME = 'video'
+PALETTE_WINDOW_NAME = 'palette'

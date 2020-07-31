@@ -24,10 +24,21 @@ def get_stains_automatically(path: str, tol: int = 3) -> List[Stain]:
     while ret and len(possible_stain_pixels) > 0:
         # Stain pixels remain unchanged during all video.
         difference = np.abs(current_image.astype(dtype=np.int) - prev_image.astype(dtype=np.int))
-        for i in range(len(possible_stain_pixels), -1, -1):
+        if len(possible_stain_pixels) > 100000:
+            sub_progress = tqdm(total=len(possible_stain_pixels))
+        else:
+            sub_progress = None
+
+        for i in tqdm(range(len(possible_stain_pixels) - 1, -1, -1)):
             x, y = possible_stain_pixels[i]
             if np.sum(difference[y, x, :]) > tol:
                 possible_stain_pixels.pop(i)
+
+            if sub_progress is not None:
+                sub_progress.update(1)
+
+        if sub_progress is not None:
+            sub_progress.close()
 
         # Update previous and current images.
         prev_image = current_image

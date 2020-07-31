@@ -15,7 +15,7 @@ def get_video_path():
             print(f'There is no video with location `{video_path}`.')
         else:
             video_capture = cv2.VideoCapture(video_path)
-            ret, _ = video_capture.read(video_path)
+            ret, _ = video_capture.read()
             if ret:
                 return video_path
             else:
@@ -58,14 +58,21 @@ def get_out_stains_path() -> str:
         stains_path = input('Insert path to json file where stains will be stored:\n\t')
         stains_path = os.path.abspath(stains_path)
 
-        if not os.path.exists(os.path.dirname(stains_path)):
-            out_path = _optionally_create_directory(stains_path)
-            if out_path is None:
-                continue
-            else:
-                return out_path
-
-        print('Please insert a valid path.')
+        out_path = _optionally_create_directory(stains_path)
+        if out_path is None:
+            print('Please insert a valid path.')
+            continue
+        elif os.path.exists(out_path):
+            while True:
+                proceed = input(f'There already exists a file named `{out_path}`. Do you want to overwrite it?: [y/N]')
+                if proceed.lower() in list(NO_ANSWERS) + ['']:
+                    break
+                elif proceed.lower() in YES_ANSWERS:
+                    return out_path
+                else:
+                    print(f"I don't understand your answer. Please repeat it.")
+        else:
+            return out_path
 
 
 def get_out_video_path() -> str:
@@ -85,12 +92,13 @@ def get_out_video_path() -> str:
         else:
             out_path = _optionally_create_directory(out_path)
             if out_path is None:
+                print('Please insert a valid path.')
                 continue
             else:
                 return out_path
 
 
-def get_size(size_name: str, default_val: int = 512) -> int:
+def get_size(size_name: str, default_val: int = 768) -> int:
     while True:
         size_string = input(f'Insert {size_name}: [{default_val}]\n\t')
 

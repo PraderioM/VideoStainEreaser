@@ -1,10 +1,19 @@
-from typing import Dict, List, Optional
+from math import cos, sin, pi
+from typing import Dict, List, Optional, Tuple
 
 import cv2
 import numpy as np
-from scipy.spatial import ConvexHull
 
-from utils import draw_centered_text
+from utils import cuts_segment, draw_centered_text, draw_polygon
+
+TO_COORDINATES_CONVERSION_MATRIX = np.array(
+    [
+        [cos(-pi / 6) - cos(7 * pi / 6), cos(pi / 2) - cos(7 * pi / 6), cos(7 * pi / 6)],
+        [sin(-pi / 6) - sin(7 * pi / 6), sin(pi / 2) - sin(7 * pi / 6), sin(7 * pi / 6)],
+        [0, 0, 1],
+    ]
+)
+TO_RGB_CONVERSION_MATRIX = np.linalg.inv(TO_COORDINATES_CONVERSION_MATRIX)
 
 
 class RGBPoint:
@@ -14,226 +23,250 @@ class RGBPoint:
         self.b = b
 
     @classmethod
+    def from_coordinates(cls, x: float, y: float,
+                         intensity: float,
+                         accept_out_of_bounds: bool = False) -> Optional['RGBPoint']:
+        color = np.dot(TO_RGB_CONVERSION_MATRIX, np.array([[x], [y], [1]]))
+        r = color[0, 0]
+        g = color[1, 0]
+        b = 1 - r - g
+
+        if accept_out_of_bounds:
+            r = min(1., max(0., r))
+            g = min(1., max(0., g))
+            b = min(1., max(0., b))
+
+        if accept_out_of_bounds or (0 <= r <= 1 and 0 <= g <= 1 and 0 <= b <= 1):
+            return RGBPoint(r=int(r * intensity * 255),
+                            g=int(g * intensity * 255),
+                            b=int(b * intensity * 255))
+        else:
+            return None
+
+    @classmethod
     def from_json(cls, json_data: Dict[str, int]) -> 'RGBPoint':
         return RGBPoint(r=json_data['r'], g=json_data['g'], b=json_data['b'])
 
     def to_json(self) -> Dict[str, int]:
         return {'r': self.r, 'g': self.g, 'b': self.b}
 
+    @property
+    def intensity(self) -> float:
+        return (self.r + self.g + self.b) / (256 * 3)
+
+    @property
+    def norm_r(self) -> float:
+        return self.r / (self.r + self.g + self.b)
+
+    @property
+    def norm_g(self) -> float:
+        return self.g / (self.r + self.g + self.b)
+
+    @property
+    def norm_b(self) -> float:
+        return self.b / (self.r + self.g + self.b)
+
+    @property
+    def coordinates(self) -> Tuple[float, float]:
+        color = np.dot(TO_COORDINATES_CONVERSION_MATRIX, np.array([[self.norm_r], [self.norm_g], [1]]))
+        x = color[0, 0]
+        y = color[1, 0]
+        return float(x), float(y)
+
+
+EMPTY_PALETTE = [
+    [
+        RGBPoint.from_coordinates(x=x / 255, y=y / 255, intensity=1)
+        for x in range(-255, 256)
+    ]
+    for y in range(255, -256, -1)
+]
+EMPTY_PALETTE = [
+    [
+        [point.norm_b, point.norm_g, point.norm_r] if point is not None
+        else [0, 0, 0] if (i-255)**2 + (j-255)**2 <= 255**2
+        else [1, 1, 1]
+        for i, point in enumerate(row)
+    ]
+    for j, row in enumerate(EMPTY_PALETTE)
+]
+EMPTY_PALETTE = np.array(EMPTY_PALETTE)
+
 
 class RGBRegion:
-    POSSIBLE_AXES = {'r', 'g', 'b'}
 
-    def __init__(self, points: List[RGBPoint], size: int = 512, x_axis: str = 'r', y_axis: str = 'g',
-                 z_axis_val: int = 0, z_bar_height: int = 20,
-                 z_sections_size: int = 96):
-        rgb_points: List[RGBPoint] = []
-        for point in points:
-            for r in range(-1, 2):
-                for g in range(-1, 2):
-                    for b in range(-1, 2):
-                        rgb_points.append(RGBPoint(r=point.r+r, g=point.g+g, b=point.b+b))
-        if len(rgb_points) == 0:
-            self._convex_hull = None
+    def __init__(self, points: List[RGBPoint], size: int = 512, intensity_bar_height: int = 40,
+                 intensity_bar_padding: int = 10):
+        self._points = [point for point in points if point is not None]
+
+        if len(self._points) == 0:
+            self._min_intensity = 0.
+            self._max_intensity = 1.
         else:
-            self._convex_hull = ConvexHull(np.array([[point.r, point.g, point.b] for point in rgb_points]))
-        self._size = size
+            intensities = [point.intensity for point in self._points]
+            self._min_intensity = min(intensities)
+            self._max_intensity = max(intensities)
 
-        assert x_axis in self.POSSIBLE_AXES, f'Unrecognized axis value `{x_axis}`'
-        assert y_axis in self.POSSIBLE_AXES, f'Unrecognized axis value `{y_axis}`'
-        error_msg = f'x_axis and y_axis values must be different however got x_axis = {x_axis} and y_axis = {y_axis}.'
-        assert x_axis != y_axis, error_msg
-        self._x_axis = x_axis
-        self._y_axis = y_axis
-        self.z_axis_val = z_axis_val
-        self._z_bar_height = z_bar_height
-        self._z_sections_size = z_sections_size
+        self._size = size
+        self._intensity_bar_height = intensity_bar_height
+        self._intensity_bar_padding = min(intensity_bar_padding, int(intensity_bar_height / 2) - 1)
 
     @classmethod
     def from_json(cls, json_data: List[Dict[str, int]]) -> 'RGBRegion':
         return RGBRegion(points=[RGBPoint.from_json(point_data) for point_data in json_data])
 
-    def add_point(self, point: RGBPoint):
-        if self._convex_hull is None:
-            self._convex_hull = ConvexHull(np.array([[point.r, point.g, point.b]], dtype=np.int))
-        else:
-            points = self._convex_hull.vertices
-            self._convex_hull = ConvexHull(
-                np.concatenate([points, np.array([[point.r, point.g, point.b]],
-                                                 dtype=points.dtype)])
-            )
+    def add_point(self, point: Optional[RGBPoint]):
+        if point is None:
+            return
+        self._min_intensity = min(self._min_intensity, point.intensity)
+        self._max_intensity = max(self._max_intensity, point.intensity)
+        self._points.append(point)
+        if len(self._points) == 1:
+            self._points.append(RGBPoint(r=point.r, g=point.g, b=point.b))
 
     def to_json(self) -> List[Dict[str, int]]:
         return [point.to_json() for point in self.points]
 
-    def is_color_in_region(self, r: int, g: int, b: int, hull: Optional[ConvexHull] = None):
-        if hull is None:
-            convex_hull = self.convex_hull
+    def contains_color(self, r: int, g: int, b: int):
+        if len(self.points) <= 2:
+            return False
 
-            if convex_hull is None:
-                return False
-            else:
-                hull = convex_hull
+        # Intensity range must be correct.
+        point = RGBPoint(r=r, g=g, b=b)
+        if not (self._min_intensity <= point.intensity <= self._max_intensity):
+            return False
 
-        points = hull.points
-        new_hull = ConvexHull(np.concatenate([points, np.array([[r, g, b]], dtype=points.dtype)]))
-        return np.array_equal(new_hull.vertices, hull.vertices)
+        start_points = self.points
+        end_points = self.points[1:] + self.points[:1]
+        cut_count = 0
+        x, y = point.coordinates
+        for start_point, end_point in zip(start_points, end_points):
+            if cuts_segment(x=x, y=y,
+                            extreme_1=start_point.coordinates,
+                            extreme_2=end_point.coordinates):
+                cut_count += 1
 
-    @property
-    def convex_hull(self) -> Optional[ConvexHull]:
-        return self._convex_hull
+        # Odd number of cuts means point belongs to region.
+        return cut_count % 2 == 1
 
     def get_color_palette(self):
         # Get z_axis bar.
-        z_axis_bar = self._get_z_axis_bar(axis=self.z_axis, val=self.z_axis_val, width=self.size,
-                                          height=self.z_bar_height)
+        intensity_bar = self._get_intensity_bar(width=self.size, padding=self._intensity_bar_padding,
+                                                height=self._intensity_bar_height)
 
         # Get main palette.
-        main_palette = self.get_z_section_palette(size=self.size, x_axis=self.x_axis, y_axis=self.y_axis,
-                                                  z_axis_val=self.z_axis_val)
-
-        # Get auxiliary palettes.
-        auxiliary_palettes = self._get_auxiliary_palettes(size=self.z_sections_size, height=self.size,
-                                                          x_axis=self.x_axis, y_axis=self.y_axis)
-
-        # Get clear button.
-        clear_button = self._get_clear_button(width=self.z_sections_size, height=self.z_bar_height)
+        main_palette = self.get_rgb_palette(size=self.size)
 
         # Concatenate images to obtain output image.
-        return np.concatenate(arrays=[
-            np.concatenate([main_palette, z_axis_bar], axis=0),
-            np.concatenate([auxiliary_palettes, clear_button], axis=0)
-        ],
-            axis=1)
+        return np.concatenate([main_palette, intensity_bar], axis=0)
 
-    def get_z_section_palette(self, size: int, x_axis: str, y_axis: str, z_axis_val: int,
-                              color_shift: int = 5, n_pixels_per_color: int = 4) -> np.ndarray:
-        z_axis = list(self.POSSIBLE_AXES - {x_axis, y_axis})[0]
-        convex_hull = self.convex_hull
-        z_section: List[List[List[int]]] = []
-        for y in range(255, -1, -1):
-            band: List[List[List[int]]] = [[] for _ in range(n_pixels_per_color)]
-            for x in range(256):
-                color = {x_axis: x, y_axis: y, z_axis: z_axis_val}
-                if not self.is_color_in_region(r=color['r'], g=color['g'], b=color['b'], hull=convex_hull):
-                    for i in range(n_pixels_per_color):
-                        for j in range(n_pixels_per_color):
-                            if x * n_pixels_per_color + i + y * n_pixels_per_color + j % 2 == 0:
-                                shift_val = color_shift
-                            else:
-                                shift_val = -color_shift
-                            new_color = {axis: min(255, max(0, val + shift_val)) for axis, val in color.items()}
-                            band[j].append([new_color['b'], new_color['g'], new_color['r']])
+    def replace_last_point(self, point: Optional[RGBPoint]):
+        if point is None:
+            return
+        if len(self._points) >= 1:
+            self._points[-1] = point
 
-            # Add new band.
-            z_section.extend(band)
+    def get_rgb_palette(self, size: int) -> np.ndarray:
+        palette = EMPTY_PALETTE.copy()
+        palette = palette * self.mean_intensity * 255
+        palette = palette.astype(np.uint8)
+        palette = cv2.resize(palette, dsize=(size, size))
 
-        # Resize and return.
-        image = np.array(z_section, dtype=np.uint8)
-        return cv2.resize(image, dsize=(size, size))
+        # draw region and return.
+        if len(self._points) >= 2:
+            coordinates_list = [point.coordinates for point in self._points]
+            points = [((1 + x) / 2, (1 - y) / 2) for x, y in coordinates_list]
+            palette = draw_polygon(palette,
+                                   points=points,
+                                   color=(255, 255, 255),
+                                   thickness=2)
+        return palette
 
-    def _get_auxiliary_palettes(self, size: int, height: int, x_axis: str, y_axis: str) -> np.ndarray:
-        n_palettes = height // size
-        remaining_blank_height = height - n_palettes * size
-
-        palette_list: List[np.ndarray] = []
-        for i in range(n_palettes):
-            # Blank image.
-            blank_height = remaining_blank_height // (n_palettes + 1 - i)
-            blank_image = np.ones((blank_height, size, 3)) * 255
-            remaining_blank_height = remaining_blank_height - blank_height
-
-            # Auxiliary palette.
-            z_axis_val = 125 if n_palettes == 1 else int(255 * i / (n_palettes - 1))
-            auxiliary_palette = self.get_z_section_palette(size=size, x_axis=x_axis, y_axis=y_axis,
-                                                           z_axis_val=z_axis_val)
-
-            palette_list.append(blank_image)
-            palette_list.append(auxiliary_palette)
-
-        # Get last blank image
-        palette_list.append(np.ones((remaining_blank_height, size, 3)) * 255)
-
-        return np.concatenate(palette_list, axis=0)
-
-    def _get_z_axis_bar(self, axis: str, val: int,
-                        height: int = 20, width: int = 512,
-                        pointer_width: int = 2) -> np.ndarray:
-        bar_height = int(height/2)
-        bar = np.ones(shape=(bar_height, width, 3), dtype=np.uint8) * 255
+    def _get_intensity_bar(self,
+                           height: int = 20, width: int = 512,
+                           padding: int = 10,
+                           cursor_width: int = 2) -> np.ndarray:
+        # Main bar.
+        bar = np.ones(shape=(height, width, 3), dtype=np.uint8) * 255
+        # Cursor bar.
         bar = cv2.rectangle(img=bar,
-                            pt1=(0, int(bar_height / 2)),
-                            pt2=(width, int(bar_height / 2)),
+                            pt1=(padding, int(height / 2)),
+                            pt2=(width - padding, int(height / 2)),
                             color=(0, 0, 0),
                             thickness=-1)
-        pointer_color = tuple(self.get_axis_color(axis=axis, val=val))
-        bar = cv2.rectangle(img=bar,
-                            pt1=(int(width * val / 255 - pointer_width / 2), 0),
-                            pt2=(int(width * val / 255 + pointer_width / 2), bar_height),
-                            color=pointer_color,
-                            thickness=-1)
 
-        upper_bar_height = height - bar_height
-        upper_bar = np.ones((upper_bar_height, width, 3), dtype=np.uint8) * 255
-        upper_bar = draw_centered_text(upper_bar, text='change for x axis', cx=1/3)
-        upper_bar = draw_centered_text(upper_bar, text='change for y axis', cx=2/3)
+        # Draw vertical cursors.
+        bar = self._draw_cursor(bar=bar, padding=padding, cursor_width=cursor_width, intensity=self._min_intensity)
+        bar = self._draw_cursor(bar=bar, padding=padding, cursor_width=cursor_width, intensity=self._max_intensity)
 
-        return np.concatenate([upper_bar, bar], axis=0)
+        # Write intensities.
+        bar = draw_centered_text(bar,
+                                 text=f'{self.min_intensity:.2f}',
+                                 cx=(width - 2 * padding) * self.min_intensity / width + padding / width)
+        bar = draw_centered_text(bar,
+                                 text=f'{self.max_intensity:.2f}',
+                                 cx=(width - 2 * padding) * self.max_intensity / width + padding / width)
+        bar = draw_centered_text(bar,
+                                 text=f'{self.mean_intensity:.2f}',
+                                 cx=(width - 2 * padding) * self.mean_intensity / width + padding / width)
+        return bar
 
-    def change_x_axis(self):
-        self._x_axis = self.z_axis
-
-    def change_y_axis(self):
-        self._y_axis = self.z_axis
+    def reset(self):
+        self._min_intensity = 0
+        self._max_intensity = 1.
+        self._points = []
 
     @property
     def points(self) -> List[RGBPoint]:
-        if self._convex_hull is None:
-            return []
-        else:
-            return [RGBPoint(r=vertex[0], g=vertex[1], b=vertex[2]) for vertex in self._convex_hull.vertices]
+        return self._points[:]
+
+    @property
+    def n_points(self) -> int:
+        return len(self._points)
 
     @property
     def size(self) -> int:
         return self._size
 
     @property
-    def z_bar_height(self) -> int:
-        return self._z_bar_height
+    def mean_intensity(self) -> float:
+        return (self._min_intensity + self._max_intensity) / 2
 
     @property
-    def z_sections_size(self) -> int:
-        return self._z_sections_size
+    def min_intensity(self) -> float:
+        return self._min_intensity
+
+    @min_intensity.setter
+    def min_intensity(self, intensity: float):
+        self._min_intensity = min(1., max(0., min(intensity, self._max_intensity)))
 
     @property
-    def x_axis(self) -> str:
-        return self._x_axis
+    def max_intensity(self) -> float:
+        return self._max_intensity
+
+    @max_intensity.setter
+    def max_intensity(self, intensity: float):
+        self._max_intensity = min(1., max(0., max(intensity, self._min_intensity)))
 
     @property
-    def y_axis(self) -> str:
-        return self._y_axis
-
-    @property
-    def z_axis(self) -> str:
-        return list(self.POSSIBLE_AXES - {self._x_axis, self._y_axis})[0]
+    def padding(self) -> int:
+        return self._intensity_bar_padding
 
     @staticmethod
-    def get_axis_color(axis: str, val: int = 1) -> np.ndarray:
-        if axis == 'r':
-            color = (0, 0, val)
-        elif axis == 'g':
-            color = (0, val, 0)
-        elif axis == 'b':
-            color = (val, 0, 0)
-        else:
-            raise ValueError(f'Unrecognized axis `{axis}`.')
-
-        return np.array(color, dtype=np.uint8)
-
-    @staticmethod
-    def _get_clear_button(width: int, height: int):
-        button = np.ones((height, width, 3), dtype=np.uint8) * 255
-        return draw_centered_text(button, text='clear')
-
-    def clear_region(self):
-        self._convex_hull = None
+    def _draw_cursor(bar: np.ndarray, padding: int, cursor_width: int, intensity: float) -> np.ndarray:
+        h, w, _ = bar.shape
+        color = int(intensity * 255)
+        bar = cv2.rectangle(
+            img=bar,
+            pt1=(padding + int((w - 2 * padding) * intensity - cursor_width / 2), 0),
+            pt2=(padding + int((w - 2 * padding) * intensity + cursor_width / 2), h),
+            color=(color, color, color),
+            thickness=-1
+        )
+        return cv2.rectangle(
+            img=bar,
+            pt1=(padding + int((w - 2 * padding) * intensity - cursor_width / 2), 0),
+            pt2=(padding + int((w - 2 * padding) * intensity + cursor_width / 2), h),
+            color=(255 - color, 255 - color, 255 - color),
+            thickness=1
+        )

@@ -20,7 +20,18 @@ class Stain:
 
     @classmethod
     def from_pixels(cls, pixels: List[Tuple[FramePoint, RGBPoint]]) -> 'Stain':
-        rgb_region = RGBRegion(points=[point for _, point in pixels])
+        intensities = [point.intensity for _, point in pixels]
+        min_intensity = min(intensities)
+        max_intensity = max(intensities)
+        convex_hull = ConvexHull(np.array([list(point.coordinates) for _, point in pixels]))
+        rgb_region = RGBRegion(
+            points=[
+                RGBPoint.from_coordinates(x=vertex[0],
+                                          y=vertex[1],
+                                          intensity=min_intensity if i % 2 == 0 else max_intensity)
+                for i, vertex in enumerate(convex_hull.vertices)
+            ]
+        )
         convex_hull = ConvexHull(np.array([[point.x, point.y] for point, _ in pixels]))
         frame_region = FrameRegion(points=[FramePoint(x=vertex[0], y=vertex[1]) for vertex in convex_hull.vertices])
 
@@ -51,7 +62,7 @@ class Stain:
         stain_pixels: List[Pixel] = []
         for y, x in region_pixels:
             b, g, r = image[y, x, :]
-            if self.rgb_region.is_color_in_region(r=r, g=g, b=b):
+            if self.rgb_region.contains_color(r=r, g=g, b=b):
                 stain_pixels.append((y, x))
 
         return stain_pixels

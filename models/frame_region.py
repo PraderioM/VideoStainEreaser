@@ -3,7 +3,7 @@ from typing import Dict, List, Tuple
 import numpy as np
 
 from models.pixel import Pixel
-from utils import draw_polygon
+from utils import draw_polygon, cuts_segment
 
 
 class FramePoint:
@@ -34,9 +34,6 @@ class FrameRegion:
     def add_point(self, point: FramePoint):
         self._points.append(point)
 
-    def remove_last_point(self, point: FramePoint):
-        self._points.append(point)
-
     def get_pixels(self, h: int, w: int) -> List[Pixel]:
         pixels: List[Pixel] = []
         for y in range(h):
@@ -54,31 +51,20 @@ class FrameRegion:
         end_points = self.points[1:] + self.points[:1]
         cut_count = 0
         for start_point, end_point in zip(start_points, end_points):
-            if self._cuts_segment(x=x, y=y, extreme_1=start_point, extreme_2=end_point):
+            if cuts_segment(x=x, y=y,
+                            extreme_1=(start_point.x, start_point.y),
+                            extreme_2=(end_point.x, end_point.y)):
                 cut_count += 1
 
         # Odd number of cuts means point belongs to region.
         return cut_count % 2 == 1
 
-    @staticmethod
-    def _cuts_segment(x: float, y: float, extreme_1: FramePoint, extreme_2: FramePoint):
-        x_1, y_1 = extreme_1.x, extreme_1.y
-        x_2, y_2 = extreme_2.x, extreme_2.y
-
-        # If segment is vertical we check if point lies exactly in the segment.
-        if x_1 == x_2:
-            return x_1 == x and y_1 <= y < y
-
-        # If segment is not vertical we get the point vertical projection onto the segment.
-        y_aux = (x - x_1) * (y_2 - y_1) / (x_2 - x_1) + y_1
-
-        # The point cuts if the projection falls within the segments limits and above the point.
-        return x_1 <= x < x_2 and y_aux >= y
-
     def draw_on_image(self, image: np.ndarray,
                       color: Tuple[int, int, int] = (0, 255, 0),
                       thickness: int = 2) -> np.ndarray:
-        return draw_polygon(image=image, points=self.points, color=color, thickness=thickness)
+        return draw_polygon(image=image,
+                            points=[(point.x, point.y) for point in self.points],
+                            color=color, thickness=thickness)
 
     @property
     def points(self) -> List[FramePoint]:

@@ -9,7 +9,7 @@ def draw_centered_text(image: np.ndarray,
                        cx: float = 0.5, cy: float = 0.5,
                        font_scale: int = 1, font_face: int = 1,
                        color: Tuple[int, int, int] = (0, 0, 0),
-                       thickness: int = 1):
+                       thickness: int = 1) -> np.ndarray:
     (x_shift, y_shift), _ = cv2.getTextSize(text, fontFace=font_face, fontScale=font_scale, thickness=thickness)
     x_shift = int(x_shift)
     y_shift = int(y_shift)
@@ -20,15 +20,31 @@ def draw_centered_text(image: np.ndarray,
                        fontScale=font_scale, color=color, thickness=thickness)
 
 
-def draw_polygon(image: np.ndarray, points: List, color: Tuple[int, int, int] = (0, 255, 0), thickness: int = 2):
+def draw_polygon(image: np.ndarray, points: List[Tuple[float, float]],
+                 color: Tuple[int, int, int] = (0, 255, 0), thickness: int = 2):
     start_points = points
     end_points = points[1:] + points[:1]
     h, w, _ = image.shape
-    for start_point, end_point in zip(start_points, end_points):
+    for (x_start, y_start), (x_end, y_end) in zip(start_points, end_points):
         image = cv2.line(img=image,
-                         pt1=(int(start_point.x * w), int(start_point.y * h)),
-                         pt2=(int(end_point.x * w), int(end_point.y * h)),
+                         pt1=(int(x_start * w), int(y_start * h)),
+                         pt2=(int(x_end * w), int(y_end * h)),
                          color=color,
                          thickness=thickness)
 
     return image
+
+
+def cuts_segment(x: float, y: float, extreme_1: Tuple[float, float], extreme_2: Tuple[float, float]):
+    x_1, y_1 = extreme_1
+    x_2, y_2 = extreme_2
+
+    # If segment is vertical we check if point lies exactly in the segment.
+    if x_1 == x_2:
+        return x_1 == x and y_1 <= y < y
+
+    # If segment is not vertical we get the point vertical projection onto the segment.
+    y_aux = (x - x_1) * (y_2 - y_1) / (x_2 - x_1) + y_1
+
+    # The point cuts if the projection falls within the segments limits and above the point.
+    return x_1 <= x < x_2 and y_aux >= y

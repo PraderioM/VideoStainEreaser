@@ -11,23 +11,28 @@ from stain_selection.constants import VIDEO_WINDOW_NAME, PALETTE_WINDOW_NAME
 
 
 class RefreshIndicator:
-    def __init__(self, refresh_video: bool = True, refresh_color_palette: bool = True):
+    def __init__(self, refresh_video: bool = True,
+                 refresh_color_palette: bool = True,
+                 refresh_on_mouse_over: bool = True):
         self.refresh_video = refresh_video
         self.refresh_color_palette = refresh_color_palette
+        self.refresh_on_mouse_over = refresh_on_mouse_over
 
 
 def define_stains(path: str) -> List[Stain]:
+    # setup.
+    show_h = get_size(size_name='showed image height')
+    show_w = get_size(size_name='showed image width')
     print_instructions()
 
     video = cv2.VideoCapture(path)
-    show_h = get_size(size_name='showed image height')
-    show_w = get_size(size_name='showed image width')
 
     create_windows()
     stain_list: List[Optional[Stain]] = [None]
     refresh_indicator = RefreshIndicator()
     set_mouse_callbacks(stain_list=stain_list, refresh_indicator=refresh_indicator, show_h=show_h, show_w=show_w)
     start_loop(video=video, stain_list=stain_list, refresh_indicator=refresh_indicator, show_h=show_h, show_w=show_w)
+    close_windows()
 
     return [stain for stain in stain_list if stain is not None]
 
@@ -37,21 +42,29 @@ def create_windows():
     cv2.namedWindow(PALETTE_WINDOW_NAME, cv2.WINDOW_GUI_NORMAL + cv2.WINDOW_AUTOSIZE)
 
 
+def close_windows():
+    cv2.destroyWindow(VIDEO_WINDOW_NAME)
+    cv2.destroyWindow(PALETTE_WINDOW_NAME)
+
+
 def set_mouse_callbacks(stain_list: List[Optional[Stain]], refresh_indicator: RefreshIndicator,
                         show_h: int = 512, show_w: int = 512):
     # Video mouse callbacks.
     def video_mouse_callback(event: int, x: int, y: int, flags: int, param: Optional):
         if event == cv2.EVENT_LBUTTONDOWN:
             if len(stain_list) == 0 or stain_list[-1] is None:
-                stain_list.pop()
+                if len(stain_list) > 0:
+                    stain_list.pop()
                 new_frame_region = FrameRegion(points=[FramePoint(x=x/show_w, y=y/show_h),
                                                        FramePoint(x=x/show_w, y=y/show_h)])
                 new_rgb_region = RGBRegion([])
                 new_stain = Stain(frame_region=new_frame_region, rgb_region=new_rgb_region)
                 stain_list.append(new_stain)
+                refresh_indicator.refresh_color_palette = True
             else:
                 frame_region = stain_list[-1].frame_region
                 frame_region.add_point(FramePoint(x=x/show_w, y=y/show_h))
+            refresh_indicator.refresh_video = True
         elif event == cv2.EVENT_RBUTTONDOWN:
             selected_point = FramePoint(x=x / show_w, y=y / show_h)
             i = 0
@@ -67,41 +80,44 @@ def set_mouse_callbacks(stain_list: List[Optional[Stain]], refresh_indicator: Re
                     stain_list.pop(i)
                 else:
                     i += 1
-        elif len(stain_list) != 0 and stain_list[-1] is not None:
+            refresh_indicator.refresh_video = True
+        elif len(stain_list) != 0 and stain_list[-1] is not None and refresh_indicator.refresh_on_mouse_over:
             frame_region = stain_list[-1].frame_region
             frame_region.replace_last_point(point=FramePoint(x=x/show_w, y=y/show_h))
+            refresh_indicator.refresh_video = True
 
     cv2.setMouseCallback(VIDEO_WINDOW_NAME, video_mouse_callback)
 
     # Palette mouse callbacks
     def palette_mouse_callback(event: int, x: int, y: int, flags: int, param: Optional):
-        if event != cv2.EVENT_LBUTTONDOWN:
-            return
-
         if len(stain_list) == 0 or stain_list[-1] is None:
             return
 
         rgb_region = stain_list[-1].rgb_region
-        if x < rgb_region.size and y < rgb_region.size:
-            color = {
-                rgb_region.x_axis: min(255, int(256 * x / rgb_region.size)),
-                rgb_region.y_axis: max(0, 255 - int(256 * y / rgb_region.size)),
-                rgb_region.z_axis: rgb_region.z_axis_val,
-            }
-            rgb_region.add_point(RGBPoint(r=color['r'], g=color['g'], b=color['b']))
-            refresh_indicator.refresh_color_palette = True
-        elif x < rgb_region.size and y >= rgb_region.size + int(rgb_region.z_bar_height / 2):
-            rgb_region.z_axis_val = min(255, int(256 * x / rgb_region.size))
-            refresh_indicator.refresh_color_palette = True
-        elif x < rgb_region.size / 2 and rgb_region.size <= y < rgb_region.size + rgb_region.z_bar_height / 2:
-            rgb_region.change_x_axis()
-            refresh_indicator.refresh_color_palette = True
-        elif x >= rgb_region.size / 2 and rgb_region.size <= y < rgb_region.size + rgb_region.z_bar_height / 2:
-            rgb_region.change_y_axis()
-            refresh_indicator.refresh_color_palette = True
-        elif x >= rgb_region.size and y >= rgb_region.size:
-            rgb_region.clear_region()
-            refresh_indicator.refresh_color_palette = True
+        if y < rgb_region.size:
+            x = 2 * (x - rgb_region.size / 2) / rgb_region.size
+            y = 2 * (rgb_region.size / 2 - y) / rgb_region.size
+            point = RGBPoint.from_coordinates(x=x, y=y, intensity=rgb_region.mean_intensity, accept_out_of_bounds=True)
+
+            if event == cv2.EVENT_LBUTTONDOWN:
+                rgb_region.add_point(point)
+                refresh_indicator.refresh_color_palette = True
+            elif event == cv2.EVENT_RBUTTONDOWN and rgb_region.contains_color(r=point.r, g=point.g, b=point.b):
+                rgb_region.reset()
+                refresh_indicator.refresh_color_palette = True
+            elif rgb_region.n_points >= 1 and refresh_indicator.refresh_on_mouse_over:
+                rgb_region.replace_last_point(point=point)
+                refresh_indicator.refresh_color_palette = True
+
+        else:
+            # replace min intensity.
+            if event == cv2.EVENT_LBUTTONDOWN:
+                rgb_region.min_intensity = (x - rgb_region.padding) / (rgb_region.size - 2 * rgb_region.padding)
+                refresh_indicator.refresh_color_palette = True
+            # replace max intensity.
+            elif event == cv2.EVENT_RBUTTONDOWN:
+                rgb_region.max_intensity = (x - rgb_region.padding) / (rgb_region.size - 2 * rgb_region.padding)
+                refresh_indicator.refresh_color_palette = True
 
     cv2.setMouseCallback(PALETTE_WINDOW_NAME, palette_mouse_callback)
 
@@ -132,6 +148,8 @@ def start_loop(video: cv2.VideoCapture, stain_list: List[Stain],
             if refresh_indicator.refresh_color_palette:
                 if len(stain_list) == 0 or stain_list[-1] is None:
                     palette_image = empty_palette_image.copy()
+                else:
+                    palette_image = stain_list[-1].get_color_palette()
                 refresh_indicator.refresh_color_palette = False
 
             # Show images and process key-board callbacks.
@@ -164,6 +182,8 @@ def process_key(key: int, stain_list: List[Optional[Stain]], refresh_indicator: 
         next_image = True
     elif key == ord('q'):
         break_loop = True
+    elif key == ord('p'):
+        refresh_indicator.refresh_on_mouse_over = not refresh_indicator.refresh_on_mouse_over
 
     return next_image, break_loop
 
@@ -172,13 +192,15 @@ def print_instructions():
     print("""
 KEYBOARD COMMANDS:
   `s`: saves current stain and opens a new one.
+  `p`: stops/resumes refreshing of images on mouse over.
   `n`: moves to the next video image.
   `q`: saves current stain and quits stain selection.
 VIDEO WINDOW:
-  `click`: add new point to stain region.
+  `click`: add new vertex to stain region.
   `right-click`: remove existing stain.
 PALETTE WINDOW:
   `click palette`: Add new vertex to region of stain color.
-  `click z axis bar`: Changes z axis value of color palette.
-  `click change z axis`: Places z axis in place of the selected axis.
+  `right-click palette`: Resets drawn polygon.
+  `click intensity bar`: Changes minimum intensity value.
+  `right-click intensity bar`: Changes maximum intensity value.
 """)

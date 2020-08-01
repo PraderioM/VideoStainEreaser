@@ -1,5 +1,5 @@
 from math import cos, sin, pi
-from typing import Dict, List, Optional, Tuple
+from typing import Dict, List, Optional, Tuple, Union
 
 import cv2
 import numpy as np
@@ -54,17 +54,40 @@ class RGBPoint:
     def intensity(self) -> float:
         return (self.r + self.g + self.b) / (256 * 3)
 
+    @intensity.setter
+    def intensity(self, intensity_val: float):
+        intensity = self.intensity
+        if intensity == 0:
+            new_val = min(255, max(0, int(intensity_val*256)))
+            self.r = new_val
+            self.g = new_val
+            self.b = new_val
+        else:
+            scaling_factor = intensity_val / intensity
+            self.r = min(255, max(0, int(self.r * scaling_factor)))
+            self.g = min(255, max(0, int(self.g * scaling_factor)))
+            self.b = min(255, max(0, int(self.b * scaling_factor)))
+
     @property
     def norm_r(self) -> float:
-        return self.r / (self.r + self.g + self.b)
+        if self.r + self.g + self.b == 0:
+            return 1 / 3
+        else:
+            return self.r / (self.r + self.g + self.b)
 
     @property
     def norm_g(self) -> float:
-        return self.g / (self.r + self.g + self.b)
+        if self.r + self.g + self.b == 0:
+            return 1 / 3
+        else:
+            return self.g / (self.r + self.g + self.b)
 
     @property
     def norm_b(self) -> float:
-        return self.b / (self.r + self.g + self.b)
+        if self.r + self.g + self.b == 0:
+            return 1 / 3
+        else:
+            return self.b / (self.r + self.g + self.b)
 
     @property
     def coordinates(self) -> Tuple[float, float]:
@@ -95,37 +118,58 @@ EMPTY_PALETTE = np.array(EMPTY_PALETTE)
 
 class RGBRegion:
 
-    def __init__(self, points: List[RGBPoint], size: int = 512, intensity_bar_height: int = 40,
+    def __init__(self, points: List[RGBPoint], min_intensity: float = 0, max_intensity: float = 1,
+                 size: int = 512, intensity_bar_height: int = 40,
                  intensity_bar_padding: int = 10):
-        self._points = [point for point in points if point is not None]
+        self._points = []
+        for point in points:
+            if point is None:
+                continue
+            new_point = RGBPoint(r=point.r, g=point.g, b=point.b)
+            new_point.intensity = 0.5
+            self._points.append(new_point)
 
-        if len(self._points) == 0:
-            self._min_intensity = 0.
-            self._max_intensity = 1.
-        else:
-            intensities = [point.intensity for point in self._points]
-            self._min_intensity = min(intensities)
-            self._max_intensity = max(intensities)
+        if len(self._points) == 1:
+            point = self._points[-1]
+            self._points.append(RGBPoint(r=point.r, g=point.g, b=point.b))
+
+        self._min_intensity = min_intensity
+        self._max_intensity = max_intensity
 
         self._size = size
         self._intensity_bar_height = intensity_bar_height
         self._intensity_bar_padding = min(intensity_bar_padding, int(intensity_bar_height / 2) - 1)
 
     @classmethod
-    def from_json(cls, json_data: List[Dict[str, int]]) -> 'RGBRegion':
-        return RGBRegion(points=[RGBPoint.from_json(point_data) for point_data in json_data])
+    def from_json(cls, json_data: Dict[str, Union[List[Dict[str, int]], float]]) -> 'RGBRegion':
+        return RGBRegion(points=[RGBPoint.from_json(point_data) for point_data in json_data['points']],
+                         min_intensity=json_data['min_intensity'],
+                         max_intensity=json_data['max_intensity'])
 
     def add_point(self, point: Optional[RGBPoint]):
         if point is None:
             return
-        self._min_intensity = min(self._min_intensity, point.intensity)
-        self._max_intensity = max(self._max_intensity, point.intensity)
-        self._points.append(point)
+        new_point = RGBPoint(r=point.r, g=point.g, b=point.b)
+        new_point.intensity = 0.5
+        self._points.append(new_point)
         if len(self._points) == 1:
-            self._points.append(RGBPoint(r=point.r, g=point.g, b=point.b))
+            self._points.append(RGBPoint(r=new_point.r, g=new_point.g, b=new_point.b))
 
-    def to_json(self) -> List[Dict[str, int]]:
-        return [point.to_json() for point in self.points]
+    def to_json(self) -> Dict[str, Union[List[Dict[str, int]], float]]:
+        points = self.points
+        if len(points) == 0:
+            return {
+                'points': [],
+                'min_intensity': self._min_intensity,
+                'max_intensity': self._max_intensity
+            }
+
+        # Set first and last point intensity to min and max intensities.
+        return {
+            'points': [point.to_json() for point in self.points],
+            'min_intensity': self._min_intensity,
+            'max_intensity': self._max_intensity
+        }
 
     def contains_color(self, r: int, g: int, b: int):
         if len(self.points) <= 2:

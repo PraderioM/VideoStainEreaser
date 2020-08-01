@@ -21,14 +21,18 @@ def remove_stains(video: cv2.VideoCapture, stain_list: List[Stain], out_path: st
                       frameSize=(w, h),
                       isColor=True)
 
-    region_pixels_list = [stain.get_region_pixels(h=h, w=w) for stain in stain_list]
+    region_pixels_list = [stain.get_region_pixels(h=h, w=w) for stain in tqdm(stain_list, desc='getting region pixels')]
     stain_pixels_list = [
         stain.get_stain_pixels(image=img, region_pixels=region_pixels)
-        for stain, region_pixels in zip(stain_list, region_pixels_list)
+        for stain, region_pixels in tqdm(zip(stain_list, region_pixels_list),
+                                         desc='getting stain pixels',
+                                         total=len(stain_list))
     ]
     averaging_pixels_list = [
         stain.get_averaging_pixels(image=img, region_pixels=region_pixels, stain_pixels=stain_pixels)
-        for stain, region_pixels, stain_pixels in zip(stain_list, region_pixels_list, stain_pixels_list)
+        for stain, region_pixels, stain_pixels in tqdm(zip(stain_list, region_pixels_list, stain_pixels_list),
+                                                       desc='getting averaging pixels',
+                                                       total=len(stain_pixels_list))
     ]
 
     progress = tqdm(total=int(video.get(cv2.CAP_PROP_FRAME_COUNT)))

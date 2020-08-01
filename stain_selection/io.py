@@ -11,5 +11,5 @@ def get_stored_stains(path: str):
 
 
 def store_stains(stain_list: List[Stain], path: str):
-    with open(path) as data_file:
+    with open(path, 'w') as data_file:
         json.dump([stain.to_json() for stain in stain_list], data_file)

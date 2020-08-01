@@ -41,10 +41,13 @@ def cuts_segment(x: float, y: float, extreme_1: Tuple[float, float], extreme_2: 
 
     # If segment is vertical we check if point lies exactly in the segment.
     if x_1 == x_2:
-        return x_1 == x and y_1 <= y < y
+        return x_1 == x and y_1 <= y < y_2
+    elif not (x_1 <= x < x_2 or x_2 <= x < x_1):
+        return False
+    else:
+        # If segment is not vertical and vertical projection falls on segment we get the point vertical projection
+        # onto the segment and check it falls above it.
+        y_aux = (x - x_1) * (y_2 - y_1) / (x_2 - x_1) + y_1
 
-    # If segment is not vertical we get the point vertical projection onto the segment.
-    y_aux = (x - x_1) * (y_2 - y_1) / (x_2 - x_1) + y_1
-
-    # The point cuts if the projection falls within the segments limits and above the point.
-    return x_1 <= x < x_2 and y_aux >= y
+        # The point cuts if the projection falls within the segments limits and above the point.
+        return y_aux >= y

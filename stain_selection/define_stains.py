@@ -159,7 +159,8 @@ def start_loop(video: cv2.VideoCapture, stain_list: List[Stain],
 
             # Process pressed key.
             next_image, break_loop = process_key(key=key, stain_list=stain_list,
-                                                 refresh_indicator=refresh_indicator)
+                                                 refresh_indicator=refresh_indicator,
+                                                 original_image=original_image)
 
             if next_image or break_loop:
                 break
@@ -172,7 +173,9 @@ def start_loop(video: cv2.VideoCapture, stain_list: List[Stain],
         refresh_indicator.refresh_video = True
 
 
-def process_key(key: int, stain_list: List[Optional[Stain]], refresh_indicator: RefreshIndicator) -> Tuple[bool, bool]:
+def process_key(key: int, stain_list: List[Optional[Stain]],
+                refresh_indicator: RefreshIndicator,
+                original_image: np.ndarray) -> Tuple[bool, bool]:
     next_image, break_loop = False, False
     if key == ord('s'):
         refresh_indicator.refresh_color_palette = True
@@ -184,6 +187,13 @@ def process_key(key: int, stain_list: List[Optional[Stain]], refresh_indicator: 
         break_loop = True
     elif key == ord('p'):
         refresh_indicator.refresh_on_mouse_over = not refresh_indicator.refresh_on_mouse_over
+    elif key == ord('t') and len(stain_list) != 0 and stain_list[-1] is not None:
+        stain = stain_list[-1]
+        show_image = stain.fill(image=original_image.copy())
+        win_name = 'removal result'
+        cv2.imshow(win_name, show_image)
+        cv2.waitKey(0)
+        cv2.destroyWindow(win_name)
 
     return next_image, break_loop
 
@@ -192,14 +202,16 @@ def print_instructions():
     print("""
 KEYBOARD COMMANDS:
   `s`: saves current stain and opens a new one.
-  `p`: stops/resumes refreshing of images on mouse over.
+  `p`: pauses/resumes refreshing of images on mouse over.
   `n`: moves to the next video image.
   `q`: saves current stain and quits stain selection.
+  `t`: Uses defined stain in order to manipulate the image and show the result of such manipulation.
+       Press any key to proceed.
 VIDEO WINDOW:
   `click`: add new vertex to stain region.
   `right-click`: remove existing stain.
-PALETTE WINDOW:
-  `click palette`: Add new vertex to region of stain color.
+STAIN WINDOW:
+  `click`: Add new vertex to region of stain color.
   `right-click palette`: Resets drawn polygon.
   `click intensity bar`: Changes minimum intensity value.
   `right-click intensity bar`: Changes maximum intensity value.

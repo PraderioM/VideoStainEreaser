@@ -4,6 +4,7 @@ from tempfile import TemporaryDirectory
 import cv2
 
 from parameters_setting import get_video_path, get_fps, get_stains_path, get_out_stains_path, get_out_video_path
+from parameters_setting import get_fill_type
 from remove_stains import remove_stains
 from stain_selection.io import get_stored_stains, store_stains
 from stain_selection.define_stains import define_stains
@@ -28,10 +29,12 @@ def main():
     # region stain removal.
     video = cv2.VideoCapture(video_path)
     stain_list = get_stored_stains(stains_path)
+    fill_type = not get_fill_type()
     with TemporaryDirectory() as tmp_dir:
         tmp_out_video_path = os.path.join(tmp_dir, os.path.basename(out_video_path))
         tmp_audio_path = os.path.join(tmp_dir, 'audio.mp3')
-        remove_stains(video=video, stain_list=stain_list, out_path=tmp_out_video_path, fps=fps)
+        remove_stains(video=video, stain_list=stain_list, out_path=tmp_out_video_path, fps=fps,
+                      fill_type=fill_type)
         copy_audio(in_video_images_path=tmp_out_video_path,
                    in_video_audio_path=video_path,
                    generated_audio_path=tmp_audio_path,

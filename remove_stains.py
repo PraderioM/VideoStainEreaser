@@ -6,7 +6,9 @@ from tqdm import tqdm
 from models import Stain
 
 
-def remove_stains(video: cv2.VideoCapture, stain_list: List[Stain], out_path: str, fps: Optional[float]):
+def remove_stains(video: cv2.VideoCapture, stain_list: List[Stain], out_path: str, fps: Optional[float],
+                  fill_type: int = 1):
+    assert fill_type in [1, 2], f'Unrecognized fill type `{fill_type}`.'
     # Read first frame.
     if fps is None:
         fps = video.get(cv2.CAP_PROP_FPS)
@@ -38,12 +40,28 @@ def remove_stains(video: cv2.VideoCapture, stain_list: List[Stain], out_path: st
                                                        total=len(stain_pixels_list))
     ]
 
+    if fill_type == 2:
+        per_pixel_averaging_list_list = [
+            stain.get_per_pixel_averaging_list(stain_pixels=stain_pixels, averaging_pixels=averaging_pixels)
+            for stain, stain_pixels, averaging_pixels in tqdm(zip(stain_list, stain_pixels_list, averaging_pixels_list),
+                                                              desc='getting weighted stain pixels',
+                                                              total=len(stain_pixels_list))
+        ]
+    else:
+        per_pixel_averaging_list_list = [None for _ in averaging_pixels_list]
+
     progress = tqdm(total=int(video.get(cv2.CAP_PROP_FRAME_COUNT)), desc='removing stains.')
     while ret:
         # Fill stains with mean value of surrounding pixels.
         out_img = img.copy()
-        for stain, stain_pixels, averaging_pixels in zip(stain_list, stain_pixels_list, averaging_pixels_list):
-            out_img = stain.fill(image=out_img, stain_pixels=stain_pixels, averaging_pixels=averaging_pixels)
+        for stain, stain_pixels, averaging_pixels, per_pixel_averaging_list in zip(stain_list,
+                                                                                   stain_pixels_list,
+                                                                                   averaging_pixels_list,
+                                                                                   per_pixel_averaging_list_list):
+            out_img = stain.fill(image=out_img, stain_pixels=stain_pixels,
+                                 averaging_pixels=averaging_pixels,
+                                 per_pixel_averaging_list=per_pixel_averaging_list,
+                                 fill_type=fill_type)
 
         # Store results.
         video_writer.write(out_img)

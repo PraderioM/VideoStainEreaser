@@ -1,5 +1,5 @@
 import os
-from typing import Optional
+from typing import Optional, Tuple
 
 import cv2
 
@@ -146,6 +146,19 @@ def get_size(size_name: str, default_val: int = 768) -> int:
             print('Please insert a valid integer.')
         else:
             return int(size_string)
+
+
+def get_fill_type() -> int:
+    while True:
+        fill_type = input('What type of algorithm do you wish to use for filling stains?:\n'
+                          '\t1) (DEFAULT) fast algorithm taking average over all neighbour pixels.\n'
+                          '\t2) medium speed taking average over all neighbour pixels in the same row or columns.')
+        if len(fill_type) == 0:
+            return 1
+        elif (not fill_type.isnumeric()) or int(fill_type) not in [1, 2]:
+            print("You must select either option 1 or 2.")
+        else:
+            return int(fill_type)
 
 
 def _optionally_create_directory(path: str) -> Optional[str]:

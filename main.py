@@ -29,7 +29,7 @@ def main():
     # region stain removal.
     video = cv2.VideoCapture(video_path)
     stain_list = get_stored_stains(stains_path)
-    fill_type = not get_fill_type()
+    fill_type = get_fill_type()
     with TemporaryDirectory() as tmp_dir:
         tmp_out_video_path = os.path.join(tmp_dir, os.path.basename(out_video_path))
         tmp_audio_path = os.path.join(tmp_dir, 'audio.mp3')

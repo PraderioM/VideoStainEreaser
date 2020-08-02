@@ -1,5 +1,5 @@
 import os
-from typing import Optional, Tuple
+from typing import Optional
 
 import cv2
 
@@ -152,7 +152,7 @@ def get_fill_type() -> int:
     while True:
         fill_type = input('What type of algorithm do you wish to use for filling stains?:\n'
                           '\t1) (DEFAULT) fast algorithm taking average over all neighbour pixels.\n'
-                          '\t2) medium speed taking average over all neighbour pixels in the same row or columns.')
+                          '\t2) medium speed taking average over all neighbour pixels in the same row or columns.\n')
         if len(fill_type) == 0:
             return 1
         elif (not fill_type.isnumeric()) or int(fill_type) not in [1, 2]:

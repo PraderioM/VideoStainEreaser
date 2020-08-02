@@ -1,71 +1,60 @@
-from typing import Dict, List, Optional, Tuple, Union
+from typing import Dict, List, Optional, Tuple
 
 import numpy as np
 from scipy.spatial import ConvexHull
 
 from models.frame_region import FramePoint, FrameRegion
-from models.rgb_region import RGBPoint, RGBRegion
 from models.pixel import Pixel
 
 
 class Stain:
-    def __init__(self, frame_region: FrameRegion, rgb_region: RGBRegion):
-        self.frame_region = frame_region
-        self.rgb_region = rgb_region
+    def __init__(self, neighborhood: FrameRegion, crop: FrameRegion):
+        self.neighborhood = neighborhood
+        self.crop = crop
 
     @classmethod
-    def from_json(cls, json_data: Dict[str, Union[List[Dict[str, int]], List[Dict[str, float]]]]) -> 'Stain':
-        return Stain(frame_region=FrameRegion.from_json(json_data['frame_region']),
-                     rgb_region=RGBRegion.from_json(json_data['rgb_region']))
+    def from_json(cls, json_data: Dict[str, List[Dict[str, float]]]) -> 'Stain':
+        return Stain(neighborhood=FrameRegion.from_json(json_data['neighborhood']),
+                     crop=FrameRegion.from_json(json_data['crop']))
 
     @classmethod
-    def from_pixels(cls, pixels: List[Tuple[FramePoint, RGBPoint]]) -> 'Stain':
-        intensities = [point.intensity for _, point in pixels]
-        min_intensity = min(intensities)
-        max_intensity = max(intensities)
-        convex_hull = ConvexHull(np.array([list(point.coordinates) for _, point in pixels]))
-        rgb_region = RGBRegion(
-            points=[
-                RGBPoint.from_coordinates(x=vertex[0],
-                                          y=vertex[1],
-                                          intensity=min_intensity if i % 2 == 0 else max_intensity)
-                for i, vertex in enumerate(convex_hull.vertices)
-            ]
-        )
+    def from_pixels(cls, pixels: List[Tuple[FramePoint, bool]]) -> 'Stain':
         convex_hull = ConvexHull(np.array([[point.x, point.y] for point, _ in pixels]))
-        frame_region = FrameRegion(points=[FramePoint(x=vertex[0], y=vertex[1]) for vertex in convex_hull.vertices])
+        frame_region_neighborhood = FrameRegion(points=[FramePoint(x=vertex[0], y=vertex[1])
+                                                        for vertex in convex_hull.vertices])
+        convex_hull = ConvexHull(np.array([[point.x, point.y] for point, is_precise in pixels if is_precise]))
+        precise_frame_region = FrameRegion(points=[FramePoint(x=vertex[0], y=vertex[1])
+                                                   for vertex in convex_hull.vertices])
 
-        return Stain(frame_region=frame_region, rgb_region=rgb_region)
+        return Stain(neighborhood=frame_region_neighborhood, crop=precise_frame_region)
 
-    def to_json(self) -> Dict[str, Union[List[Dict[str, int]], List[Dict[str, float]]]]:
+    def to_json(self) -> Dict[str, List[Dict[str, float]]]:
         return {
-            'frame_region': self.frame_region.to_json(),
-            'rgb_region': self.rgb_region.to_json(),
+            'neighborhood': self.neighborhood.to_json(),
+            'crop': self.crop.to_json(),
         }
 
     def draw_on_image(self, image: np.ndarray, color: Tuple[int, int, int], thickness: int = 2) -> np.ndarray:
-        return self.frame_region.draw_on_image(image, color=color, thickness=thickness)
+        return self.neighborhood.draw_on_image(image, color=color, thickness=thickness)
 
-    def get_color_palette(self) -> np.ndarray:
-        return self.rgb_region.get_color_palette()
+    def get_roi_crop(self, image: np.ndarray, out_h: Optional[int] = None, out_w: Optional[int] = None) -> np.ndarray:
+        return self.neighborhood.get_roi_crop(image, out_h=out_h, out_w=out_w)
 
-    def get_region_pixels(self, h: int, w: int) -> List[Pixel]:
-        return self.frame_region.get_pixels(h=h, w=w)
+    def draw_on_roi(self, image: np.ndarray, x_min: float, y_min: float, x_max: float, y_max: float,
+                    color: Tuple[int, int, int] = (0, 0, 255), thickness: int = 2) -> np.ndarray:
+        return self.crop.draw_on_roi(image, x_min=x_min, y_min=y_min, x_max=x_max, y_max=y_max,
+                                     color=color, thickness=thickness)
+
+    def get_neighborhood_pixels(self, h: int, w: int) -> List[Pixel]:
+        return self.neighborhood.get_pixels(h=h, w=w)
 
     def get_stain_pixels(self, image: np.ndarray, region_pixels: Optional[List[Pixel]] = None) -> List[Pixel]:
         # Get missing data from image.
+        h, w, _ = image.shape
         if region_pixels is None:
-            h, w, _ = image.shape
-            region_pixels = self.get_region_pixels(h=h, w=w)
+            region_pixels = self.get_neighborhood_pixels(h=h, w=w)
 
-        # Stain pixels are formed by those pixels in the frame region that belong to the rgb region.
-        stain_pixels: List[Pixel] = []
-        for y, x in region_pixels:
-            b, g, r = image[y, x, :]
-            if self.rgb_region.contains_color(r=r, g=g, b=b):
-                stain_pixels.append((y, x))
-
-        return stain_pixels
+        return self.crop.get_pixels(h=h, w=w, possible_pixels=region_pixels)
 
     def get_averaging_pixels(self, image: np.ndarray,
                              region_pixels: Optional[List[Pixel]] = None,
@@ -73,7 +62,7 @@ class Stain:
         # Get missing data from image.
         if region_pixels is None:
             h, w, _ = image.shape
-            region_pixels = self.get_region_pixels(h=h, w=w)
+            region_pixels = self.get_neighborhood_pixels(h=h, w=w)
 
         if stain_pixels is None:
             stain_pixels = self.get_stain_pixels(image=image, region_pixels=region_pixels)
@@ -97,7 +86,7 @@ class Stain:
         # Get missing data from image.
         if stain_pixels is None or averaging_pixels is None:
             h, w, _ = image.shape
-            region_pixels = self.get_region_pixels(h=h, w=w)
+            region_pixels = self.get_neighborhood_pixels(h=h, w=w)
 
             if stain_pixels is None:
                 stain_pixels = self.get_stain_pixels(image=image, region_pixels=region_pixels)
@@ -105,6 +94,10 @@ class Stain:
             if averaging_pixels is None:
                 averaging_pixels = self.get_averaging_pixels(image=image, region_pixels=region_pixels,
                                                              stain_pixels=stain_pixels)
+
+        # If there are no averaging pixels we can average nothing.
+        if len(averaging_pixels) == 0:
+            return image
 
         # Get average color by averaging colors in averaging pixels.
         color_list = np.array([image[y, x, :].tolist() for y, x in averaging_pixels], dtype=np.int)
@@ -114,3 +107,19 @@ class Stain:
         for y, x in stain_pixels:
             image[y, x, :] = average_color
         return image
+
+    @property
+    def x_min(self) -> float:
+        return self.neighborhood.x_min
+
+    @property
+    def x_max(self) -> float:
+        return self.neighborhood.x_max
+
+    @property
+    def y_min(self) -> float:
+        return self.neighborhood.y_min
+
+    @property
+    def y_max(self) -> float:
+        return self.neighborhood.y_max

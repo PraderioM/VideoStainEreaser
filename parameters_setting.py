@@ -26,7 +26,7 @@ def get_video_path():
 
 def get_fps() -> Optional[float]:
     while True:
-        fps_string = input('Insert video fps. If nothing is specified fps will be inferred from video metadata but video metadata may be wrong:\n\t')
+        fps_string = input('Insert video fps. If nothing is specified fps will be inferred from video metadata:\n\t')
 
         if len(fps_string) == 0:
             return None
@@ -39,7 +39,8 @@ def get_fps() -> Optional[float]:
 
 def get_stains_path() -> Optional[str]:
     while True:
-        stains_path = input('Insert path to json file containing stains information. If no such file exists of you want to create it anew leave this region black:\n\t')
+        stains_path = input('Insert path to json file containing stains information.\n'
+                            'If you want/need to create it anew leave this region black:\n\t')
 
         if len(stains_path) == 0:
             return None
@@ -53,9 +54,26 @@ def get_stains_path() -> Optional[str]:
         print('Please insert a valid path.')
 
 
-def get_out_stains_path() -> str:
+def get_out_stains_path(video_path: Optional[str] = None) -> str:
+    # Get default.
+    if video_path is None:
+        default_stains_path = ''
+    else:
+        split_video_path = list(os.path.splitext(video_path))
+        if len(split_video_path) == 0:
+            default_stains_path = ''
+        else:
+            split_video_path[-1] = 'json'
+            default_stains_path = '.'.join(split_video_path)
+
+    # Ask user for input.
     while True:
-        stains_path = input('Insert path to json file where stains will be stored:\n\t')
+        if len(default_stains_path) == 0:
+            stains_path = input('Insert path to json file where stains will be stored:\n\t')
+        else:
+            stains_path = input(f'Insert path to json file where stains will be stored: [{default_stains_path}]\n\t')
+        if len(stains_path) == 0:
+            stains_path = default_stains_path
         stains_path = os.path.abspath(stains_path)
 
         out_path = _optionally_create_directory(stains_path)
@@ -75,13 +93,32 @@ def get_out_stains_path() -> str:
             return out_path
 
 
-def get_out_video_path() -> str:
+def get_out_video_path(in_video_path: Optional[str] = None) -> str:
+    # Get default.
+    if in_video_path is None:
+        default_out_path = ''
+    else:
+        split_video_path = list(os.path.splitext(in_video_path))
+        if len(split_video_path) <= 1:
+            default_out_path = ''
+        else:
+            split_video_path[-1] = 'avi'
+            split_video_path[-2] = split_video_path[-2] + '_cleaned'
+            default_out_path = '.'.join(split_video_path)
+
+    # Ask user for input.
     while True:
-        out_path = input('Insert output video path:\n\t')
+        if len(default_out_path) == 0:
+            out_path = input('Insert output video path:\n\t')
+        else:
+            out_path = input(f'Insert output video path: [{default_out_path}]\n\t')
+        if len(out_path) == 0:
+            out_path = default_out_path
         out_path = os.path.abspath(out_path)
         if os.path.exists(out_path):
             while True:
-                proceed = input(f'There already exists a video with location `{out_path}`. Are you sure you want to proceed? If you do previous video will be removed: [y/N]')
+                proceed = input(f'There already exists a video with location `{out_path}`.\n'
+                                f'Are you sure you want to proceed? If you do previous video will be removed: [y/N]')
                 if proceed.lower() in list(NO_ANSWERS) + ['']:
                     break
                 elif proceed.lower() in YES_ANSWERS:
@@ -109,17 +146,6 @@ def get_size(size_name: str, default_val: int = 768) -> int:
             print('Please insert a valid integer.')
         else:
             return int(size_string)
-
-
-def get_define_stains_manually() -> bool:
-    while True:
-        define_manually = input(f'Doy you wish to define stains manually?: [y/N]')
-        if define_manually.lower() in list(NO_ANSWERS) + ['']:
-            return False
-        elif define_manually.lower() in YES_ANSWERS:
-            return True
-        else:
-            print(f"I don't understand your answer. Please repeat it.")
 
 
 def _optionally_create_directory(path: str) -> Optional[str]:
